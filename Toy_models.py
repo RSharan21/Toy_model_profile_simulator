@@ -21,8 +21,8 @@ class Pulsar_model:
 	DM : despersive measure
 	Flux_f0 : Flux density at f0 (inherited from telescope_details)	(unit: Jansky)
 	'''
-	obs_BW = 200
-	f0 = 300
+	obs_BW = 400
+	f0 = 1060
 	N_chan = 512
 
 	P0 = 0.0054
@@ -346,8 +346,10 @@ class Pulsar_model:
 									  figsize=(8, 8),
 									  width_ratios=(4, 1), height_ratios=(1, 4, 1, 1))
 		
-		fig.subplots_adjust(left=0.35)
-
+		fig.subplots_adjust(hspace=0, wspace=0, left=0.35)
+		n_y_ticks = 10
+		dy_ticks = self.N_chan // n_y_ticks
+		y0, y1 = np.arange(self.N_chan)[::dy_ticks][:-1], self.frequency_MHz[::dy_ticks].astype(int)[:-1]
 		if not hasattr(self, 'scat_params'):
 			print('scat_params not found !')
 
@@ -355,18 +357,28 @@ class Pulsar_model:
 			self.add_tau_to_model()
 
 		profile_plot, = axs['Profile'].plot(self.profile_template_1d)
+
 		axs['Profile'].set_xlim([0, self.nbin])
 		dyn_spec_plot = axs['Dynamic_spectra'].imshow(self.model_data, origin='lower', aspect='auto')
-		spectra_plot, = axs['spectra'].plot(self.radio_frequency_spectra, np.arange(self.N_chan))
+		axs['Dynamic_spectra'].set_ylabel('Frequency (MHz)')
+		max_pixel_plot, = axs['Dynamic_spectra'].plot(np.argmax(self.model_data, axis=1), np.arange(self.N_chan), 'r.')
+
+		spectra_plot, = axs['spectra'].plot(self.radio_frequency_spectra, np.arange(self.N_chan), label='Model Spectra')
+		max_pixel_spectra, = axs['spectra'].plot(np.max(self.model_data, axis=1), np.arange(self.N_chan), label='Peak Pixel Spectra')
 		axs['spectra'].set_ylim([0, self.N_chan])
+		axs['spectra'].set_xlim([0, np.max(np.array([np.max(self.model_data, axis=1), self.radio_frequency_spectra]))])
+		spectra_legend = axs['spectra'].legend(prop={'size': 10}, ncol=1)
+		plt.setp(spectra_legend.get_texts(), rotation=-90)
 
 
 		#conv_f = 1/self.tau_arr[0] * np.exp(-np.arange(self.nbin) / self.tau_arr[0])
 		#conv_f = np.convolve(self.profile_template_1d, conv_f)[:self.N_chan]
 		conv_f1 = self.model_data.mean(0)
 		conv_f2 = self.model_data[0]
-		P_conv_plot0, = axs['Convolved_profile'].plot(conv_f1)
-		P_conv_plot1, = axs['Convolved_profile'].plot(conv_f2)
+		P_conv_plot0, = axs['Convolved_profile'].plot(conv_f1, label= 'Mean Convolved model')
+		P_conv_plot1, = axs['Convolved_profile'].plot(conv_f2, label=f'Convolved model at {self.frequency_MHz[0]} MHz')
+		P_conv_plot_max_f0 = axs['Convolved_profile'].scatter(np.argmax(conv_f2), np.max(conv_f2))
+		axs['Convolved_profile'].legend()
 		axs['Convolved_profile'].set_xlim([0, self.nbin])
 		axs['Convolved_profile'].set_ylim([np.min(conv_f1), np.max(conv_f1)])
 
@@ -378,7 +390,24 @@ class Pulsar_model:
 		Scattering_f_plot, = axs['Scattering_f'].plot(Scattering_f)
 		axs['Scattering_f'].set_xlim([0, self.nbin])
 		axs['Scattering_f'].set_ylim([np.min(Scattering_f), np.max(Scattering_f)])
-		
+		#		Merging the X-axis (phase bins axis)
+		#axs['Dynamic_spectra'].sharex(axs['Profile'])
+		#axs['Convolved_profile'].sharex(axs['Profile'])
+		#axs['Scattering_f'].sharex(axs['Profile'])
+		#axs['spectra'].sharey(axs['Dynamic_spectra'])
+
+
+		axs['Profile'].set_title('Profile')
+		axs['spectra'].set_title('Spectra')
+		axs['Profile'].set_xticks([])
+		axs['Profile'].set_ylabel('Normalised I')
+		axs['Dynamic_spectra'].set_yticks(y0, y1)
+		axs['Dynamic_spectra'].set_xticks([])
+		axs['Convolved_profile'].set_xticks([])
+		#axs['Scattering_f'].set_xticks([])
+		axs['spectra'].set_yticks([])
+		axs['spectra'].set_xlabel('Flux (Jy)')
+
 		slider_axes = []
 		sliders = []
 		
@@ -412,7 +441,7 @@ class Pulsar_model:
 		ax_tau = plt.axes([0.05, 0.14, 0.2, 0.01])
 		ax_alpha = plt.axes([0.05, 0.11, 0.2, 0.01])
 
-		tau_slider = Slider(ax_tau, r'$\tau$', 1e-5, self.tau_0_max_range, valinit=self.scat_params[0])			#	in units of number of phase bins (nbin)
+		tau_slider = Slider(ax_tau, r'$\tau_{1GHz}$', 1e-5, self.tau_0_max_range, valinit=self.scat_params[0])			#	in units of number of phase bins (nbin)
 		alpha_slider = Slider(ax_alpha, r'$\alpha$', -5, 5, valinit=self.scat_params[1])
 
 		def update(val):
@@ -430,13 +459,18 @@ class Pulsar_model:
 
 			dyn_spec_plot.set_data(self.model_data)
 			dyn_spec_plot.set_clim(vmin=np.min(self.model_data), vmax=np.max(self.model_data))
+			max_pixel_plot.set_xdata(np.argmax(self.model_data, axis=1))
 			spectra_plot.set_xdata(self.radio_frequency_spectra)
+			max_pixel_spectra.set_xdata(np.max(self.model_data, axis=1))
+			axs['spectra'].set_xlim([0, np.max(np.array([np.max(self.model_data, axis=1), self.radio_frequency_spectra]))])
+			
 
 			conv_f1 = self.model_data.mean(0)
 			conv_f2 = self.model_data[0]
 			P_conv_plot0.set_ydata(conv_f1)
 			P_conv_plot1.set_ydata(conv_f2)
-			axs['Convolved_profile'].set_ylim([np.min(conv_f1), np.max(conv_f1)])
+			P_conv_plot_max_f0.set_offsets(np.c_[np.argmax(conv_f2), np.max(conv_f2)])
+			axs['Convolved_profile'].set_ylim([np.min(np.array([conv_f1, conv_f2])), np.max(np.array([conv_f1, conv_f2]))])
 			add_label.set_text(fr'$\tau_{{\nu_l}}$ : {self.tau_arr[0]}')
 			add_label.set_color(self.label_color)
 
