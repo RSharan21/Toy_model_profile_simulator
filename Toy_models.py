@@ -22,17 +22,18 @@ class Pulsar_model:
 	Flux_f0 : Flux density at f0 (inherited from telescope_details)	(unit: Jansky)
 	'''
 	obs_BW = 400
-	f0 = 1060
+	f0 = 300
 	N_chan = 512
 
 	P0 = 0.0054
 	P1 = 0
 	P2 = 0
 	DM = 10.5
-	nbin = 512													# for now it is hard coded. Will be changed later	# P0 // fft_sampling_time
+	nbin = 200													# for now it is hard coded. Will be changed later	# P0 // fft_sampling_time
 
 	Flux_f0 = 0.01
-
+	
+	SNR_f0 = 5
 	
 	def __init__(self):
 		# self.nbin = np.max(64, int(self.P0 // self.fft_sampling_time))	# max so as to have atleast
@@ -41,7 +42,8 @@ class Pulsar_model:
 		self.F2 = ((2*self.P1**2) - (self.P2*self.P0))/(6*self.P0**3)
 		self.folded_phase_index = np.arange(self.nbin)
 		self.frequency_MHz = np.linspace(self.f0, self.f0 + self.obs_BW, self.N_chan)
-
+		#self.noise = np.random.normal(loc=0, scale=0, size=(self.N_chan, self.nbin))
+		self.noise = np.random.normal(loc=0, scale=self.Flux_f0/self.SNR_f0, size=(self.N_chan, self.nbin))
 
 
 
@@ -124,6 +126,7 @@ class Pulsar_model:
 				for freq_ind in range(self.model_data.shape[0]):
 					#self.model_data[freq_ind] =  1/(self.tau_arr[freq_ind]* (1 - np.exp(-self.nbin/self.tau_arr[freq_ind]))) * np.convolve(self.model_data[freq_ind], np.exp(-np.arange(self.nbin) / self.tau_arr[freq_ind]))[:self.nbin]
 					self.model_data[freq_ind] =  1/self.tau_arr[freq_ind] * np.convolve(self.model_data[freq_ind], np.exp(-np.arange(self.nbin) / self.tau_arr[freq_ind]))[:self.nbin]
+				self.model_data += self.noise
 			else:
 				print(f'{self.model_data.shape[0]} != {self.tau_arr.shape[0]}')
 		
@@ -140,21 +143,13 @@ class Pulsar_model:
 			User can verify this by plotting np.exp(-np.arange(self.nbin)/self.nbin/fractional_tol))  with fractional_tol = {0.5, 0.75, 1, 2, 3, 4, 5}
 			'''
 			#print('Out of parameter space for good scattering parameters')
-			self.out_good_scattering_range_alert = True
 			self.label_color = 'red'
 		else:
-			self.out_good_scattering_range_alert = False
 			self.label_color = 'green'		
 		#	if self.nbin * np.max(self.tau_arr) > 
-		self.tau_0_max_range =	self.nbin# np.max(factor * self.nbin/((self.frequency_MHz/1e3) ** (-1 * self.scat_params[1])))
+		self.tau_0_max_range = self.nbin/10# np.max(factor * self.nbin/((self.frequency_MHz/1e3) ** (-1 * self.scat_params[1])))
 		#print(fr'For frequency range $\tau_0$ should have max of {self.tau_0_max_range}')
 
-	def add_noise(self):
-		'''
-		Add Noise to the model_data
-		'''
-		pass
-		
 
 	def create_model(self):
 		'''
@@ -176,8 +171,11 @@ class Pulsar_model:
 		if hasattr(self, 'scat_params'):
 			#print('Calculate and add new tau')
 			self.add_tau_to_model()
+			self.find_scat_param_range()
 		#print('************************************************************************************************************************')
 
+
+		
 	def plot_dynamic_spectra(self):
 		'''
 		Plots profile (ax0), frequency vs phase plot (ax1) and spectral nature (ax2)
@@ -383,7 +381,7 @@ class Pulsar_model:
 		axs['Convolved_profile'].set_ylim([np.min(conv_f1), np.max(conv_f1)])
 
 		add_label = axs['Convolved_profile'].text(0,0.8, s=fr'$\tau_{{\nu_l}}$ : {self.tau_arr[0]}', 
-                                 transform=axs['Convolved_profile'].transAxes, fontsize=15, color=self.label_color)
+								 transform=axs['Convolved_profile'].transAxes, fontsize=15, color=self.label_color)
 
 		
 		Scattering_f = 1/self.tau_arr[0] * np.exp(-np.arange(self.nbin) / self.tau_arr[0])
@@ -509,86 +507,240 @@ class Pulsar_model:
 		create_sliders_profile()
 		plt.show()
 
-	"""
+
 	def plot_dynamic_spectra_slider_ultra(self):
 		fig, axs = plt.subplot_mosaic([['Profile', '.'],
-									   ['Dynamic_spectra', 'spectra']],
-									  figsize=(10, 8),
-									  width_ratios=(4, 1), height_ratios=(1, 4))
-		fig.subplots_adjust(left=0.3)  # Adjust left margin to make space for sliders
+									   ['Dynamic_spectra', 'spectra'],
+									   ['Convolved_profile', '.'],
+									   ['Scattering_f','.']],
+									  figsize=(8, 8),
+									  width_ratios=(4, 1), height_ratios=(1, 4, 1, 1))
 		
+		fig.subplots_adjust(hspace=0, wspace=0, left=0.35)
+		n_y_ticks = 10
+		dy_ticks = self.N_chan // n_y_ticks
+		y0, y1 = np.arange(self.N_chan)[::dy_ticks][:-1], self.frequency_MHz[::dy_ticks].astype(int)[:-1]
+		if not hasattr(self, 'scat_params'):
+			print('scat_params not found !')
+
+			#self.calc_tau_arr()
+			self.add_tau_to_model()
+
 		profile_plot, = axs['Profile'].plot(self.profile_template_1d)
+
 		axs['Profile'].set_xlim([0, self.nbin])
 		dyn_spec_plot = axs['Dynamic_spectra'].imshow(self.model_data, origin='lower', aspect='auto')
-		spectra_plot, = axs['spectra'].plot(self.radio_frequency_spectra, np.arange(self.N_chan))
+		axs['Dynamic_spectra'].set_ylabel('Frequency (MHz)')
+		max_flux_arg, max_flux_val, max_phase = np.argmax(self.model_data, axis=1), np.max(self.model_data, axis=1), np.arange(self.N_chan)
+		mask_flux_snr_thr = max_flux_val/(self.Flux_f0/self.SNR_f0) > 5
+		max_pixel_plot, = axs['Dynamic_spectra'].plot(max_flux_arg[mask_flux_snr_thr], max_phase[mask_flux_snr_thr], 'r.')
+
+		spectra_plot, = axs['spectra'].plot(self.radio_frequency_spectra, np.arange(self.N_chan), label='Model Spectra')
+		max_pixel_spectra, = axs['spectra'].plot(max_flux_val[mask_flux_snr_thr], np.arange(self.N_chan)[mask_flux_snr_thr], label='Peak Pixel Spectra')
 		axs['spectra'].set_ylim([0, self.N_chan])
+		axs['spectra'].set_xlim([0, np.max(np.array([max_flux_val, self.radio_frequency_spectra]))])
+		spectra_legend = axs['spectra'].legend(prop={'size': 10}, ncol=1)
+		plt.setp(spectra_legend.get_texts(), rotation=-90)
+
+
+		#conv_f = 1/self.tau_arr[0] * np.exp(-np.arange(self.nbin) / self.tau_arr[0])
+		#conv_f = np.convolve(self.profile_template_1d, conv_f)[:self.N_chan]
+		conv_f1 = self.model_data.mean(0)
 		
+		#conv_f2 = self.model_data[0]
+		peak_f_chan = np.argmax(max_flux_val)
+		conv_f2 = self.model_data[peak_f_chan]
+		P_conv_plot0, = axs['Convolved_profile'].plot(conv_f1, label= 'Mean Convolved model')
+		P_conv_plot1, = axs['Convolved_profile'].plot(conv_f2, label=f'Convolved model at {np.round(self.frequency_MHz[peak_f_chan], 3)} MHz')
+		P_conv_plot_max_f0 = axs['Convolved_profile'].scatter(np.argmax(conv_f2), np.max(conv_f2))
+		axs['Convolved_profile'].legend()
+		axs['Convolved_profile'].set_xlim([0, self.nbin])
+		axs['Convolved_profile'].set_ylim([np.min(conv_f1), np.max(conv_f1)])
+
+		add_label = axs['Convolved_profile'].text(0.7,0.8, s=fr'$\tau_{{\nu_l}}$ : {np.round(self.tau_arr[0],3)}', 
+								 transform=axs['Convolved_profile'].transAxes, fontsize=15, color=self.label_color)
+
+		
+		Scattering_f = 1/self.tau_arr[0] * np.exp(-np.arange(self.nbin) / self.tau_arr[0])
+		Scattering_f_plot, = axs['Scattering_f'].plot(Scattering_f)
+		axs['Scattering_f'].set_xlim([0, self.nbin])
+		axs['Scattering_f'].set_ylim([np.min(Scattering_f), np.max(Scattering_f)])
+		#		Merging the X-axis (phase bins axis)
+		#axs['Dynamic_spectra'].sharex(axs['Profile'])
+		#axs['Convolved_profile'].sharex(axs['Profile'])
+		#axs['Scattering_f'].sharex(axs['Profile'])
+		#axs['spectra'].sharey(axs['Dynamic_spectra'])
+
+
+		axs['Profile'].set_title('Profile')
+		axs['spectra'].set_title('Spectra')
+		axs['Profile'].set_xticks([])
+		axs['Profile'].set_ylabel('Normalised I')
+		axs['Dynamic_spectra'].set_yticks(y0, y1)
+		axs['Dynamic_spectra'].set_xticks([])
+		axs['Convolved_profile'].set_xticks([])
+		#axs['Scattering_f'].set_xticks([])
+		axs['spectra'].set_yticks([])
+		axs['spectra'].set_xlabel('Flux (Jy)')
+		###############################################################################################################################
 		slider_axes = []
 		sliders = []
 		
-		def create_sliders():
+		def create_sliders_profile():
 			for ax in slider_axes:
 				ax.remove()
 			slider_axes.clear()
 			sliders.clear()
 			
-			x_start = 0.05  # Move sliders to the left side
-			spacing_x = 0.05  # Space between vertical slider sets
+			y_start = 0.9  # Start position for sliders
+			spacing = 0.09  # Space between sliders
 			
 			for i in range(self.n_component):
-				slider_axes.append(plt.axes([x_start, 0.6 - i * spacing_x, 0.03, 0.3]))  # Amp slider
-				slider_axes.append(plt.axes([x_start + 0.05, 0.6 - i * spacing_x, 0.03, 0.3]))  # Mean slider
-				slider_axes.append(plt.axes([x_start + 0.1, 0.6 - i * spacing_x, 0.03, 0.3]))  # Std slider
+				slider_axes.append(plt.axes([0.05, y_start - i * spacing, 0.2, 0.01]))  # Amp slider
+				slider_axes.append(plt.axes([0.05, y_start - (i * spacing + 0.03), 0.2, 0.01]))  # Mean slider
+				slider_axes.append(plt.axes([0.05, y_start - (i * spacing + 0.06), 0.2, 0.01]))  # Std slider
 				
 				sliders.append((
-					Slider(slider_axes[-3], f'Amp {i+1}', 0, 1, valinit=self.profile_model_param[3*i], orientation='vertical'),
-					Slider(slider_axes[-2], f'Mean {i+1}', 0, self.nbin, valinit=self.profile_model_param[3*i+1], orientation='vertical'),
-					Slider(slider_axes[-1], f'Std {i+1}', 0.001, self.nbin, valinit=self.profile_model_param[3*i+2], orientation='vertical')
+					Slider(slider_axes[-3], f'Amp {i+1}', 0, 1, valinit=self.profile_model_param[3*i]),
+					Slider(slider_axes[-2], f'Mean {i+1}', 0, self.nbin, valinit=self.profile_model_param[3*i+1]),
+					Slider(slider_axes[-1], f'Std {i+1}', 0.001, self.nbin, valinit=self.profile_model_param[3*i+2])
 				))
-			
-			ax_scat = plt.axes([0.2, 0.15, 0.03, 0.3])
-			ax_spec = plt.axes([0.25, 0.15, 0.03, 0.3])
-			
-			if not hasattr(self, 'scat_params'):
-				self.calc_tau_arr()
-			scat_slider = Slider(ax_scat, 'Scat', 0, 2, valinit=self.scat_params[0], orientation='vertical')
-			spec_slider = Slider(ax_spec, 'Spec', -2, 2, valinit=self.spec_params[0], orientation='vertical')
-			
-		def update_scat_spec(val):
-			self.scat_params[0] = scat_slider.val
-			self.spec_params[0] = spec_slider.val
-			self.create_model()
-			dyn_spec_plot.set_data(self.model_data)
-			spectra_plot.set_xdata(self.radio_frequency_spectra)
-			fig.canvas.draw_idle()
-			
-			scat_slider.on_changed(update_scat_spec)
-			spec_slider.on_changed(update_scat_spec)
+
+			for s_amp, s_mean, s_std in sliders:
+				s_amp.on_changed(update)
+				s_mean.on_changed(update)
+				s_std.on_changed(update)
 		
+			
+		# Add sliders for scat_params (Tau and Alpha)
+		ax_tau = plt.axes([0.05, 0.14, 0.2, 0.01])
+		ax_alpha = plt.axes([0.05, 0.11, 0.2, 0.01])
+
+		tau_slider = Slider(ax_tau, r'$\tau_{1GHz}$', 1e-5, self.tau_0_max_range, valinit=self.scat_params[0])			#	in units of number of phase bins (nbin)
+		alpha_slider = Slider(ax_alpha, r'$\alpha$', -5, 5, valinit=self.scat_params[1])
+		###############################################################################################################################
+		spec_slider_axes = []
+		spec_sliders = []
+		
+		
+		
+		def create_spec_sliders():
+			for ax in spec_slider_axes:
+				ax.remove()
+			spec_slider_axes.clear()
+			spec_sliders.clear()
+			
+			y_start = 0.6
+			spacing = 0.05
+			
+			for i in range(len(self.spec_params)):
+				ax_spec = plt.axes([0.05, y_start - i * spacing, 0.2, 0.01])
+				if i == len(self.spec_params) -1:
+					spec_slider = Slider(ax_spec, f'Spec {i+1}', -4, 4, valinit=self.spec_params[i])
+				else:
+					spec_slider = Slider(ax_spec, f'Spec {i+1}', -40, 40, valinit=self.spec_params[i])
+				spec_slider_axes.append(ax_spec)
+				spec_sliders.append(spec_slider)
+				spec_slider.on_changed(update)
+
+
+
+		def update(val):
+			for i, (s_amp, s_mean, s_std) in enumerate(sliders):
+				self.profile_model_param[3*i] = s_amp.val
+				self.profile_model_param[3*i+1] = s_mean.val
+				self.profile_model_param[3*i+2] = s_std.val
+
+			for i, spec_slider in enumerate(spec_sliders):
+				self.spec_params[i] = spec_slider.val
+
+			self.scat_params[0] = tau_slider.val				#
+			self.scat_params[1] = alpha_slider.val				#
+			self.create_model()
+			#self.add_tau_to_model()
+			profile_plot.set_ydata(self.profile_template_1d)
+			axs['Profile'].set_ylim([np.min(self.profile_template_1d), np.max(self.profile_template_1d)])
+
+			dyn_spec_plot.set_data(self.model_data)
+			dyn_spec_plot.set_clim(vmin=np.min(self.model_data), vmax=np.max(self.model_data))
+			max_flux_arg, max_flux_val = np.argmax(self.model_data, axis=1), np.max(self.model_data, axis=1)
+			mask_flux_snr_thr = max_flux_val/(self.Flux_f0/self.SNR_f0) > 5
+
+			max_pixel_plot.set_ydata(max_phase[mask_flux_snr_thr])
+			max_pixel_plot.set_xdata(max_flux_arg[mask_flux_snr_thr])
+			spectra_plot.set_xdata(self.radio_frequency_spectra)
+			max_pixel_spectra.set_xdata(max_flux_val[mask_flux_snr_thr])
+			max_pixel_spectra.set_ydata(max_phase[mask_flux_snr_thr])
+			axs['spectra'].set_xlim([0, np.max(np.array([max_flux_val, self.radio_frequency_spectra]))])
+			
+
+			conv_f1 = self.model_data.mean(0)
+			#conv_f2 = self.model_data[0]
+			peak_f_chan = np.argmax(max_flux_val)									#		Frequency at which Peak pixel per channel is max
+			conv_f2 = self.model_data[peak_f_chan]
+			P_conv_plot0.set_ydata(conv_f1)
+			P_conv_plot1.set_ydata(conv_f2)
+			P_conv_plot_max_f0.set_offsets(np.c_[np.argmax(conv_f2), np.max(conv_f2)])
+			axs['Convolved_profile'].set_ylim([np.min(np.array([conv_f1, conv_f2])), np.max(np.array([conv_f1, conv_f2]))])
+			add_label.set_text(fr'$\tau_{{\nu_l}}$ : {np.round(self.tau_arr[0], 3)}')
+			add_label.set_color(self.label_color)
+
+			Scattering_f = 1/self.tau_arr[0] * np.exp(-np.arange(self.nbin) / self.tau_arr[0])
+			Scattering_f_plot.set_ydata(Scattering_f)
+			axs['Scattering_f'].set_ylim([np.min(Scattering_f), np.max(Scattering_f)])
+
+			fig.canvas.draw_idle()
+		
+
+		tau_slider.on_changed(update)
+		alpha_slider.on_changed(update)
+		
+		ax_add = plt.axes([0.6, 0.02, 0.15, 0.05])
+		ax_remove = plt.axes([0.8, 0.02, 0.15, 0.05])
+
 		ax_add_spec = plt.axes([0.05, 0.02, 0.1, 0.05])
 		ax_remove_spec = plt.axes([0.17, 0.02, 0.1, 0.05])
+
 		
+		def add_component(event):
+			if self.n_component < 5:
+				self.n_component += 1
+				self.profile_model_param.extend([1, 0.5 * self.nbin, 0.05 * self.nbin])
+				create_sliders_profile()
+				fig.canvas.draw_idle()
+		
+		def remove_component(event):
+			if self.n_component > 1:
+				self.n_component -= 1
+				self.profile_model_param = self.profile_model_param[:-3]
+				create_sliders_profile()
+				fig.canvas.draw_idle()
 		def add_spec_param(event):
 			if len(self.spec_params) < 5:
-				self.spec_params.append(0)
-				create_sliders()
-				fig.canvas.draw_idle()
+				self.spec_params.append(np.log10(self.Flux_f0))
+				create_spec_sliders()
+				update(None)
 		
 		def remove_spec_param(event):
 			if len(self.spec_params) > 1:
-				self.spec_params.pop()
-				create_sliders()
-				fig.canvas.draw_idle()
-		
+				self.spec_params.pop(-2)
+				create_spec_sliders()
+				update(None)
+
 		button_add_spec = Button(ax_add_spec, '+ Spec')
 		button_remove_spec = Button(ax_remove_spec, '- Spec')
 		button_add_spec.on_clicked(add_spec_param)
 		button_remove_spec.on_clicked(remove_spec_param)
-		
-		create_sliders()
-		plt.show()
 
-	"""
+
+		button_add = Button(ax_add, '+ Component')
+		button_remove = Button(ax_remove, '- Component')
+		button_add.on_clicked(add_component)
+		button_remove.on_clicked(remove_component)
+		
+		create_spec_sliders()
+		create_sliders_profile()
+		plt.show()
 
 
 
