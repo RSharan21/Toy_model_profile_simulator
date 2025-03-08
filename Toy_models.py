@@ -9,7 +9,7 @@ def gaussian(x, params):
 	return a Gaussian distribution with mean and standard deviation evaluated at x
 	"""
 	Amp_, mean_, std_ = params
-	return Amp_ * np.exp(-(x-mean_)**2/2/std_**2)/np.sqrt(2*np.pi*std_**2)
+	return Amp_ * np.exp(-(x-mean_)**2/2/std_**2) #/np.sqrt(2*np.pi*std_**2)
 
 class Pulsar_model:
 	'''
@@ -33,14 +33,14 @@ class Pulsar_model:
 
 	Flux_f0 = 0.01
 
-	@property
-	def process(cls):
+	
+	def __init__(self):
 		# self.nbin = np.max(64, int(self.P0 // self.fft_sampling_time))	# max so as to have atleast
-		cls.F0 = 1/cls.P0
-		cls.F1 = -(cls.P1/(cls.P0**2))/2
-		cls.F2 = ((2*cls.P1**2) - (cls.P2*cls.P0))/(6*cls.P0**3)
-		cls.folded_phase_index = np.arange(cls.nbin)
-		cls.frequency_MHz = np.linspace(cls.f0, cls.f0 + cls.obs_BW, cls.N_chan)
+		self.F0 = 1/self.P0
+		self.F1 = -(self.P1/(self.P0**2))/2
+		self.F2 = ((2*self.P1**2) - (self.P2*self.P0))/(6*self.P0**3)
+		self.folded_phase_index = np.arange(self.nbin)
+		self.frequency_MHz = np.linspace(self.f0, self.f0 + self.obs_BW, self.N_chan)
 
 
 
@@ -94,34 +94,36 @@ class Pulsar_model:
 		self.radio_frequency_spectra = 10**np.polyval(self.spec_params, np.log10(self.frequency_MHz) - np.log10(self.frequency_MHz[0]))
 
 
-	def scattering_model(self):
+	def calc_tau_arr(self):
 		'''
 		Add the parameter tau (frequency dependent) for modelling the scattering time scale.
 
-		scat_params = [tau_0, alpha]		#	tau(f) = tau(f0) * f**-alpha , where tau_0 = tau(f0) (in fraction of a pulse phase bin axis), f is and f0 is in MHz. 
-		This means that self.tau_arr is also in fractional part of a pulse phase bin axis.
+		scat_params = [tau_0, alpha]		#	tau(f) = tau(f0) * f**-alpha , where tau_0 = tau(f0) (in number of pulse phase bin), f is and f0 is in MHz. 
+		This means that self.tau_arr is also in number of phase bin of the pulse phase bin axis.
 		Note that at the current form of the function tau_0 represents the tau at 1GHz (i.e. if f0 = 1e3 tau(1GHz) = tau_0).
 		For this to be in general f0 the formulae should be changed to self.tau_arr = self.scat_params[0] * ((self.frequency_MHz/f0) ** (-1 * self.scat_params[1])),
 		where self.frequency_MHz and f0 both has to be in MHz (or in common units, here the convention is in MHz).
 		'''
 		if not hasattr(self, 'scat_params'):
-			self.scat_params = [ 0.00065, 4]
+			print(f'Picking up default values of scattering parameters : {[ 6.5, 4]}')
+			self.scat_params = [ 6.5, 4]
 
-		self.tau_arr = self.scat_params[0] * ((self.frequency_MHz/1e3) ** (-1 * self.scat_params[1]))		#	self.tau_arr is in unit of fraction of self.nbin
-		
+		self.tau_arr = self.scat_params[0] * ((self.frequency_MHz/1e3) ** (-1 * self.scat_params[1]))		#	self.tau_arr is in unit of bins
 
-	def add_scattering_model(self):
+		self.find_scat_param_range()		
+
+	def add_tau_to_model(self):
 		'''
-		Once scattering_model is called, tau_arra is calculated. This method concolves tau_arr with the existing model_data.
+		Once calc_tau_arr is called, tau_arra is calculated. This method concolves tau_arr with the existing model_data.
 		'''
-		if not hasattr(self, 'scat_params'):
-			self.scattering_model()
+		self.calc_tau_arr()
 
 
 		if hasattr(self, 'model_data'):
 			if self.model_data.shape[0] == self.tau_arr.shape[0]:
 				for freq_ind in range(self.model_data.shape[0]):
-					self.model_data[freq_ind] = np.convolve(self.model_data[freq_ind],  1/(self.nbin * self.tau_arr[freq_ind]) * np.exp(-np.arange(self.nbin)/self.nbin / self.tau_arr[freq_ind]))[:self.nbin]
+					#self.model_data[freq_ind] =  1/(self.tau_arr[freq_ind]* (1 - np.exp(-self.nbin/self.tau_arr[freq_ind]))) * np.convolve(self.model_data[freq_ind], np.exp(-np.arange(self.nbin) / self.tau_arr[freq_ind]))[:self.nbin]
+					self.model_data[freq_ind] =  1/self.tau_arr[freq_ind] * np.convolve(self.model_data[freq_ind], np.exp(-np.arange(self.nbin) / self.tau_arr[freq_ind]))[:self.nbin]
 			else:
 				print(f'{self.model_data.shape[0]} != {self.tau_arr.shape[0]}')
 		
@@ -130,16 +132,22 @@ class Pulsar_model:
 		Find the range of scattering parameters which depends on self.nbin (as tau_arr, and self.scat_params[0] is in terms of fractional part of self.nbins) and self.frequency_MHz ranges.
 		The idea is if the ranges aren't properly set, the signal get washed out or supressed easily.
 		'''
-		if np.max(self.tau_arr) < 5:		
+		factor = 1
+		if np.max(self.tau_arr) > factor * self.nbin:		
 			'''
 			This condition means that the largest self.tau_arr shouldn't very large.
-			In other words if tau, in terms of fraction part of nbin, is > 5 the exponential will become a linear function.
+			In other words if tau, in terms of fraction part of nbin, is > 2 the exponential will become a linear function.
 			User can verify this by plotting np.exp(-np.arange(self.nbin)/self.nbin/fractional_tol))  with fractional_tol = {0.5, 0.75, 1, 2, 3, 4, 5}
 			'''
-			print('Out of parameter space for good scattering parameters')
-
+			#print('Out of parameter space for good scattering parameters')
+			self.out_good_scattering_range_alert = True
+			self.label_color = 'red'
+		else:
+			self.out_good_scattering_range_alert = False
+			self.label_color = 'green'		
 		#	if self.nbin * np.max(self.tau_arr) > 
-
+		self.tau_0_max_range =	self.nbin# np.max(factor * self.nbin/((self.frequency_MHz/1e3) ** (-1 * self.scat_params[1])))
+		#print(fr'For frequency range $\tau_0$ should have max of {self.tau_0_max_range}')
 
 	def add_noise(self):
 		'''
@@ -159,13 +167,16 @@ class Pulsar_model:
 		'''
 		pass
 
-		self.process
+		#print('creating new profile template')
 		self.profile_model()
+		#print('creating new spectra model')
 		self.spectral_model()
 
 		self.model_data = self.radio_frequency_spectra.reshape(self.N_chan, 1) * self.profile_template_1d.reshape(1, self.nbin)
-
-
+		if hasattr(self, 'scat_params'):
+			#print('Calculate and add new tau')
+			self.add_tau_to_model()
+		#print('************************************************************************************************************************')
 
 	def plot_dynamic_spectra(self):
 		'''
@@ -238,9 +249,10 @@ class Pulsar_model:
 
 	def plot_dynamic_spectra_slider_mega(self):
 		fig, axs = plt.subplot_mosaic([['Profile', '.'],
-									   ['Dynamic_spectra', 'spectra']],
+									   ['Dynamic_spectra', 'spectra'],
+									   ['Convolved_profile', '.']],
 									  figsize=(8, 8),
-									  width_ratios=(4, 1), height_ratios=(1, 4))
+									  width_ratios=(4, 1), height_ratios=(1, 4, 1))
 		
 		fig.subplots_adjust(left=0.35)
 
@@ -250,6 +262,12 @@ class Pulsar_model:
 		spectra_plot, = axs['spectra'].plot(self.radio_frequency_spectra, np.arange(self.N_chan))
 		axs['spectra'].set_ylim([0, self.N_chan])
 		
+		conv_f = self.model_data[0]
+		P_conv_plot, = axs['Convolved_profile'].plot(conv_f)
+		axs['Convolved_profile'].set_xlim([0, self.nbin])
+		axs['Convolved_profile'].set_ylim([np.min(conv_f), np.max(conv_f)])
+		
+
 		slider_axes = []
 		sliders = []
 		
@@ -284,10 +302,15 @@ class Pulsar_model:
 				self.profile_model_param[3*i+1] = s_mean.val
 				self.profile_model_param[3*i+2] = s_std.val
 			self.create_model()
-			self.add_scattering_model()
+			#self.add_tau_to_model()
 			profile_plot.set_ydata(self.profile_template_1d)
 			dyn_spec_plot.set_data(self.model_data)
 			spectra_plot.set_xdata(self.radio_frequency_spectra)
+
+			conv_f = self.model_data[0]
+			P_conv_plot.set_ydata(conv_f)
+			axs['Convolved_profile'].set_ylim([np.min(conv_f), np.max(conv_f)])
+
 			fig.canvas.draw_idle()
 		
 		ax_add = plt.axes([0.6, 0.02, 0.15, 0.05])
@@ -318,15 +341,18 @@ class Pulsar_model:
 	def plot_dynamic_spectra_tau_alpha_slider(self):
 		fig, axs = plt.subplot_mosaic([['Profile', '.'],
 									   ['Dynamic_spectra', 'spectra'],
-									   ['Convolved_profile', '.']],
+									   ['Convolved_profile', '.'],
+									   ['Scattering_f','.']],
 									  figsize=(8, 8),
-									  width_ratios=(4, 1), height_ratios=(1, 4, 1))
+									  width_ratios=(4, 1), height_ratios=(1, 4, 1, 1))
 		
 		fig.subplots_adjust(left=0.35)
 
 		if not hasattr(self, 'scat_params'):
-			self.scattering_model()
-			self.add_scattering_model()
+			print('scat_params not found !')
+
+			#self.calc_tau_arr()
+			self.add_tau_to_model()
 
 		profile_plot, = axs['Profile'].plot(self.profile_template_1d)
 		axs['Profile'].set_xlim([0, self.nbin])
@@ -335,10 +361,23 @@ class Pulsar_model:
 		axs['spectra'].set_ylim([0, self.N_chan])
 
 
-		conv_f = 1/(self.nbin * self.tau_arr[0]) * np.exp(-np.arange(self.nbin)/self.nbin / self.tau_arr[0])
-		P_conv_plot, = axs['Convolved_profile'].plot(conv_f)
-		axs['Convolved_profile'].set_xlim([0, self.N_chan])
-		axs['Convolved_profile'].set_ylim([np.min(conv_f), np.max(conv_f)])
+		#conv_f = 1/self.tau_arr[0] * np.exp(-np.arange(self.nbin) / self.tau_arr[0])
+		#conv_f = np.convolve(self.profile_template_1d, conv_f)[:self.N_chan]
+		conv_f1 = self.model_data.mean(0)
+		conv_f2 = self.model_data[0]
+		P_conv_plot0, = axs['Convolved_profile'].plot(conv_f1)
+		P_conv_plot1, = axs['Convolved_profile'].plot(conv_f2)
+		axs['Convolved_profile'].set_xlim([0, self.nbin])
+		axs['Convolved_profile'].set_ylim([np.min(conv_f1), np.max(conv_f1)])
+
+		add_label = axs['Convolved_profile'].text(0,0.8, s=fr'$\tau_{{\nu_l}}$ : {self.tau_arr[0]}', 
+                                 transform=axs['Convolved_profile'].transAxes, fontsize=15, color=self.label_color)
+
+		
+		Scattering_f = 1/self.tau_arr[0] * np.exp(-np.arange(self.nbin) / self.tau_arr[0])
+		Scattering_f_plot, = axs['Scattering_f'].plot(Scattering_f)
+		axs['Scattering_f'].set_xlim([0, self.nbin])
+		axs['Scattering_f'].set_ylim([np.min(Scattering_f), np.max(Scattering_f)])
 		
 		slider_axes = []
 		sliders = []
@@ -373,38 +412,43 @@ class Pulsar_model:
 		ax_tau = plt.axes([0.05, 0.14, 0.2, 0.01])
 		ax_alpha = plt.axes([0.05, 0.11, 0.2, 0.01])
 
-		tau_slider = Slider(ax_tau, 'Tau', 1e-5, 1, valinit=self.scat_params[0] * self.nbin)			#	in units of number of phase bins (nbin)
-		alpha_slider = Slider(ax_alpha, 'Alpha', -5, 5, valinit=self.scat_params[1])
-			
-		def update_scat_params(val):
-			self.scat_params[0] = tau_slider.val/self.nbin
-			self.scat_params[1] = alpha_slider.val
-			self.create_model()
-			self.scattering_model()
-			self.add_scattering_model()
-			dyn_spec_plot.set_data(self.model_data)
-			spectra_plot.set_xdata(self.radio_frequency_spectra)
-			conv_f = 1/(self.nbin * self.tau_arr[0]) * np.exp(-np.arange(self.nbin)/self.nbin / self.tau_arr[0])
-			P_conv_plot.set_ydata(conv_f)
-			axs['Convolved_profile'].set_ylim([np.min(conv_f), np.max(conv_f)])
-			fig.canvas.draw_idle()
-		
-		tau_slider.on_changed(update_scat_params)
-		alpha_slider.on_changed(update_scat_params)
-			
+		tau_slider = Slider(ax_tau, r'$\tau$', 1e-5, self.tau_0_max_range, valinit=self.scat_params[0])			#	in units of number of phase bins (nbin)
+		alpha_slider = Slider(ax_alpha, r'$\alpha$', -5, 5, valinit=self.scat_params[1])
 
 		def update(val):
 			for i, (s_amp, s_mean, s_std) in enumerate(sliders):
 				self.profile_model_param[3*i] = s_amp.val
 				self.profile_model_param[3*i+1] = s_mean.val
 				self.profile_model_param[3*i+2] = s_std.val
+
+			self.scat_params[0] = tau_slider.val				#
+			self.scat_params[1] = alpha_slider.val				#
 			self.create_model()
-			self.add_scattering_model()
+			#self.add_tau_to_model()
 			profile_plot.set_ydata(self.profile_template_1d)
 			axs['Profile'].set_ylim([np.min(self.profile_template_1d), np.max(self.profile_template_1d)])
+
 			dyn_spec_plot.set_data(self.model_data)
+			dyn_spec_plot.set_clim(vmin=np.min(self.model_data), vmax=np.max(self.model_data))
 			spectra_plot.set_xdata(self.radio_frequency_spectra)
+
+			conv_f1 = self.model_data.mean(0)
+			conv_f2 = self.model_data[0]
+			P_conv_plot0.set_ydata(conv_f1)
+			P_conv_plot1.set_ydata(conv_f2)
+			axs['Convolved_profile'].set_ylim([np.min(conv_f1), np.max(conv_f1)])
+			add_label.set_text(fr'$\tau_{{\nu_l}}$ : {self.tau_arr[0]}')
+			add_label.set_color(self.label_color)
+
+			Scattering_f = 1/self.tau_arr[0] * np.exp(-np.arange(self.nbin) / self.tau_arr[0])
+			Scattering_f_plot.set_ydata(Scattering_f)
+			axs['Scattering_f'].set_ylim([np.min(Scattering_f), np.max(Scattering_f)])
+
 			fig.canvas.draw_idle()
+		
+
+		tau_slider.on_changed(update)
+		alpha_slider.on_changed(update)
 		
 		ax_add = plt.axes([0.6, 0.02, 0.15, 0.05])
 		ax_remove = plt.axes([0.8, 0.02, 0.15, 0.05])
@@ -431,7 +475,7 @@ class Pulsar_model:
 		create_sliders_profile()
 		plt.show()
 
-
+	"""
 	def plot_dynamic_spectra_slider_ultra(self):
 		fig, axs = plt.subplot_mosaic([['Profile', '.'],
 									   ['Dynamic_spectra', 'spectra']],
@@ -472,7 +516,7 @@ class Pulsar_model:
 			ax_spec = plt.axes([0.25, 0.15, 0.03, 0.3])
 			
 			if not hasattr(self, 'scat_params'):
-				self.scattering_model()
+				self.calc_tau_arr()
 			scat_slider = Slider(ax_scat, 'Scat', 0, 2, valinit=self.scat_params[0], orientation='vertical')
 			spec_slider = Slider(ax_spec, 'Spec', -2, 2, valinit=self.spec_params[0], orientation='vertical')
 			
@@ -510,7 +554,7 @@ class Pulsar_model:
 		create_sliders()
 		plt.show()
 
-
+	"""
 
 
 

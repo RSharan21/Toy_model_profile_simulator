@@ -34,6 +34,6 @@ psr_model.spec_params = [-20, 3.5, -2]
 psr_model.create_model()
 
 #	ploting the frequency vs phase 2d plot
-psr_model.plot_dynamic_spectra_tau_alpha_slider()
+psr_model.plot_dynamic_spectra_tau_alpha_slider() #plot_dynamic_spectra_slider_mega()
 
 
