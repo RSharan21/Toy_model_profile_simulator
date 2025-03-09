@@ -1,5 +1,5 @@
 import sys 
-sys.path.append("/home/rsharan/Desktop/PhD_project/parkes_data/Scattering_code")
+sys.path.append("/location_to_the_code/Scattering_code")
 
 from Toy_models import Pulsar_model
 
