@@ -41,7 +41,8 @@ class PulseGenerator:
     
     def __init__(self, n_freq: int = 256, n_time: int = 512, 
                  freq_min:  float = 1200, freq_max: float = 1600,
-                 time_resolution: float = 0.064):  # ms
+                 time_resolution: float = 0.064,  # ms
+                 flexible_freq_range: bool = False):
         """
         Parameters:
         -----------
@@ -53,12 +54,17 @@ class PulseGenerator:
             Frequency range in MHz
         time_resolution : float
             Time resolution in milliseconds
+        flexible_freq_range : bool
+            If True, allows the generator to adapt to different frequency ranges
+            specified in PulseParameters. If False, raises a warning when there's
+            a mismatch between generator and pulse parameter frequency ranges.
         """
         self.n_freq = n_freq
         self.n_time = n_time
         self.freq_min = freq_min
         self.freq_max = freq_max
         self.time_resolution = time_resolution
+        self.flexible_freq_range = flexible_freq_range
         
         # Create frequency array (LOW to HIGH)
         self.frequencies = np.linspace(freq_min, freq_max, n_freq)
@@ -73,6 +79,22 @@ class PulseGenerator:
     def reset(self):
         """Reset the spectrum to zeros"""
         self.spectrum = np.zeros((self.n_freq, self.n_time))
+    
+    def _reinitialize_frequency_range(self, freq_min: float, freq_max: float):
+        """
+        Reinitialize the frequency array with new range.
+        
+        Parameters:
+        -----------
+        freq_min, freq_max : float
+            New frequency range in MHz
+        """
+        self.freq_min = freq_min
+        self.freq_max = freq_max
+        self.frequencies = np.linspace(freq_min, freq_max, self.n_freq)
+        # Reset spectrum if it exists since frequency range changed
+        if self.spectrum is not None:
+            self.spectrum = np.zeros((self.n_freq, self.n_time))
         
     def add_noise(self, mean:  float = 0.0, std: float = 1.0):
         """
@@ -283,6 +305,31 @@ class PulseGenerator:
         """
         if self.spectrum is None:
             self.reset()
+        
+        # Check if pulse parameters frequency range matches generator's range
+        param_freq_min, param_freq_max = params.freq_range
+        freq_mismatch = (abs(param_freq_min - self.freq_min) > 1e-6 or 
+                        abs(param_freq_max - self.freq_max) > 1e-6)
+        
+        if freq_mismatch:
+            if self.flexible_freq_range:
+                # Reinitialize with new frequency range
+                import warnings
+                warnings.warn(
+                    f"PulseGenerator frequency range ({self.freq_min}-{self.freq_max} MHz) "
+                    f"differs from PulseParameters frequency range ({param_freq_min}-{param_freq_max} MHz). "
+                    f"Reinitializing generator with new range.",
+                    UserWarning
+                )
+                self._reinitialize_frequency_range(param_freq_min, param_freq_max)
+            else:
+                # Raise an error if not flexible
+                raise ValueError(
+                    f"PulseGenerator frequency range ({self.freq_min}-{self.freq_max} MHz) "
+                    f"does not match PulseParameters frequency range ({param_freq_min}-{param_freq_max} MHz). "
+                    f"Either create a new PulseGenerator with matching frequency range, "
+                    f"or set flexible_freq_range=True to allow automatic adaptation."
+                )
         
         # Select profile function
         profile_functions = {
