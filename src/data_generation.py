@@ -92,9 +92,8 @@ class PulseGenerator:
         self.freq_min = freq_min
         self.freq_max = freq_max
         self.frequencies = np.linspace(freq_min, freq_max, self.n_freq)
-        # Reset spectrum if it exists since frequency range changed
-        if self.spectrum is not None:
-            self.spectrum = np.zeros((self.n_freq, self.n_time))
+        # Always reset spectrum since frequency range changed
+        self.spectrum = np.zeros((self.n_freq, self.n_time))
         
     def add_noise(self, mean:  float = 0.0, std: float = 1.0):
         """
