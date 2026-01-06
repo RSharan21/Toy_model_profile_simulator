@@ -761,8 +761,31 @@ if __name__ == "__main__":
     gen.add_pulse(params3, profile_type='gaussian')
     gen.plot(title="Multi-component Pulse (α=-1.5) - Low to High Freq")
     
-    # Example 4: Generate a small dataset
-    print("\nExample 4: Generating dataset...")
+    # Example 4: Flexible frequency range adaptation
+    print("\nExample 4: Flexible frequency range (NEW FEATURE)")
+    print("Creating generator with flexible_freq_range=True...")
+    gen_flex = PulseGenerator(n_freq=256, n_time=2048,
+                             freq_min=1200, freq_max=1600,
+                             time_resolution=0.064,
+                             flexible_freq_range=True)
+    
+    # Now we can add pulses at different frequency ranges!
+    params_low_freq = PulseParameters(
+        dm=100.0,
+        freq_range=(400, 800),  # Different from generator's initial range
+        pulse_time=256,
+        pulse_width=5.0,
+        snr=15.0
+    )
+    
+    gen_flex.reset()
+    gen_flex.add_noise(mean=0, std=1.0)
+    gen_flex.add_pulse(params_low_freq, profile_type='gaussian')
+    print(f"Generator adapted to frequency range: {gen_flex.freq_min}-{gen_flex.freq_max} MHz")
+    gen_flex.plot(title="Pulse at 400-800 MHz (with flexible_freq_range=True)")
+    
+    # Example 5: Generate a small dataset
+    print("\nExample 5: Generating dataset...")
     dataset = PulseDataset(gen)
     X, y, params_list = dataset.generate_dataset(n_samples=100, pulse_fraction=0.5)
     
